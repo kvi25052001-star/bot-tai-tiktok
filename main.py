@@ -6,7 +6,7 @@ import telebot
 from flask import Flask
 from threading import Thread
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', 'DIEN_TOKEN_VAO_DAY')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', 'AAE_a32hEqaLrXAn3KY_6met0ODG9zzY8yU')
 bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 
 app = Flask('')
