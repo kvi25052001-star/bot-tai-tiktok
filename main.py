@@ -6,18 +6,30 @@ import telebot
 from flask import Flask
 from threading import Thread
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8647847576:AAE_a32hEqaLrXAn3KY_6met0ODG9zzY8yU')
-bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
+# ============================================================
+# 1. CẤU HÌNH BOT TELEGRAM
+# QUAN TRỌNG: KHÔNG hardcode token thật ở đây.
+# Vào BotFather -> /revoke để tạo token mới, rồi set biến môi trường
+# BOT_TOKEN trên Render (Settings -> Environment).
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+if not BOT_TOKEN:
+    raise RuntimeError("Chưa đặt biến môi trường BOT_TOKEN!")
 
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 app = Flask('')
+
 
 @app.route('/')
 def home():
-    return "Bot TikTok dang hoat dong!"
+    return "Bot TikTok đang hoạt động!"
+
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
+
+# ============================================================
+# 2. HÀM BÓC TÁCH LINK TIKTOK
 def get_tiktok_video(url):
     # API 1: tikwm.com
     try:
@@ -35,7 +47,7 @@ def get_tiktok_video(url):
                 print("[API1-tikwm] OK")
                 return video_url, title
     except Exception as e:
-        print(f"[API1-tikwm] Loi: {e}")
+        print(f"[API1-tikwm] Lỗi: {e}")
 
     # API 2: ssstik.io
     try:
@@ -59,7 +71,7 @@ def get_tiktok_video(url):
                 print("[API2-ssstik] OK")
                 return video_url, title
     except Exception as e:
-        print(f"[API2-ssstik] Loi: {e}")
+        print(f"[API2-ssstik] Lỗi: {e}")
 
     # API 3: savetik.net
     try:
@@ -86,7 +98,7 @@ def get_tiktok_video(url):
                 print("[API3-savetik] OK")
                 return video_url, title
     except Exception as e:
-        print(f"[API3-savetik] Loi: {e}")
+        print(f"[API3-savetik] Lỗi: {e}")
 
     return None, None
 
@@ -100,79 +112,23 @@ def expand_short_url(url):
         return url
 
 
+# ============================================================
+# 3. XỬ LÝ TIN NHẮN TELEGRAM
+# Lưu ý: xử lý TRỰC TIẾP trong handler (giống bot Xiaohongshu),
+# KHÔNG tự tạo Thread() thủ công nữa — đây là nguyên nhân chính
+# khiến bot bị đơ dần theo thời gian (thread tích tụ không kiểm soát).
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(
         message,
-        "👋 Xin chao! Gui link TikTok hoac Douyin, toi se tai video *khong logo* ve cho ban!\n\n"
-        "Ho tro:\n"
+        "👋 Xin chào! Gửi link TikTok hoặc Douyin, tôi sẽ tải video *không logo* về cho bạn!\n\n"
+        "Hỗ trợ:\n"
         "• https://www.tiktok.com/@.../video/...\n"
         "• https://vm.tiktok.com/...\n"
         "• https://vt.tiktok.com/...\n"
         "• https://www.douyin.com/video/...",
         parse_mode="Markdown"
     )
-
-
-def process_video(message, url):
-    video_url = None
-    status_msg = bot.reply_to(message, "🔄 Dang phan tich link...")
-
-    try:
-        if "vm.tiktok.com" in url or "vt.tiktok.com" in url:
-            bot.edit_message_text("🔗 Dang mo link rut gon...", message.chat.id, status_msg.message_id)
-            url = expand_short_url(url)
-
-        bot.edit_message_text("📡 Dang boc tach link video...", message.chat.id, status_msg.message_id)
-        video_url, video_title = get_tiktok_video(url)
-
-        if not video_url:
-            markup = telebot.types.InlineKeyboardMarkup()
-            markup.add(telebot.types.InlineKeyboardButton("🌐 Thu tai thu cong", url="https://ssstik.io"))
-            bot.edit_message_text(
-                "❌ Khong lay duoc link video.\nVideo co the bi rieng tu hoac da bi xoa.",
-                message.chat.id, status_msg.message_id,
-                reply_markup=markup
-            )
-            return
-
-        clean_title = re.sub(r'[^\w\s\-_]', '', video_title)[:40].strip()
-        bot.edit_message_text("📥 Dang tai video len Telegram...", message.chat.id, status_msg.message_id)
-
-        video_resp = requests.get(
-            video_url,
-            timeout=60,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"},
-            stream=True
-        )
-        chunks = b""
-        for chunk in video_resp.iter_content(chunk_size=524288):
-            if chunk:
-                chunks += chunk
-
-        bot.send_video(
-            chat_id=message.chat.id,
-            video=chunks,
-            caption=f"🎬 {clean_title}",
-            reply_to_message_id=message.message_id,
-            supports_streaming=True
-        )
-        bot.delete_message(message.chat.id, status_msg.message_id)
-
-    except Exception as error:
-        print(f"[Upload] Loi: {error}")
-        try:
-            markup = telebot.types.InlineKeyboardMarkup()
-            if video_url:
-                markup.add(telebot.types.InlineKeyboardButton("👉 Bam vao day de tai video", url=video_url))
-            bot.edit_message_text(
-                "⚠️ File qua nang (>50MB) hoac mang Render bi nghen.\n"
-                "Bam nut duoi de tai ve may:",
-                message.chat.id, status_msg.message_id,
-                reply_markup=markup
-            )
-        except Exception:
-            pass
 
 
 @bot.message_handler(func=lambda message: True)
@@ -184,18 +140,80 @@ def handle_message(message):
     )
     if not url_match:
         return
+
     url = url_match.group(0)
-    t = Thread(target=process_video, args=(message, url))
-    t.daemon = True
-    t.start()
+    status_msg = bot.reply_to(message, "🔄 Đang phân tích link...")
+    video_url = None
 
-
-if __name__ == "__main__":
-    Thread(target=run_flask).start()
     try:
-        bot.delete_webhook(drop_pending_updates=True)
-        time.sleep(1)
-    except Exception:
-        pass
-    print("✅ Bot TikTok san sang!")
-    bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        if "vm.tiktok.com" in url or "vt.tiktok.com" in url:
+            bot.edit_message_text("🔗 Đang mở link rút gọn...", message.chat.id, status_msg.message_id)
+            url = expand_short_url(url)
+
+        bot.edit_message_text("📡 Đang bóc tách link video...", message.chat.id, status_msg.message_id)
+        video_url, video_title = get_tiktok_video(url)
+
+        if not video_url:
+            markup = telebot.types.InlineKeyboardMarkup()
+            markup.add(telebot.types.InlineKeyboardButton("🌐 Thử tải thủ công", url="https://ssstik.io"))
+            bot.edit_message_text(
+                "❌ Không lấy được link video.\nVideo có thể bị riêng tư hoặc đã bị xoá.",
+                message.chat.id, status_msg.message_id,
+                reply_markup=markup
+            )
+            return
+
+        clean_title = re.sub(r'[^\w\s\-_]', '', video_title)[:40].strip()
+        bot.edit_message_text("📥 Đang tải video lên Telegram...", message.chat.id, status_msg.message_id)
+
+        # Tải video giống bot XHS: dùng .content trực tiếp với timeout rõ ràng,
+        # tránh vòng lặp iter_content thủ công có thể bị treo khi mạng chập chờn.
+        video_resp = requests.get(
+            video_url,
+            timeout=30,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.tiktok.com/"}
+        )
+        video_bytes = video_resp.content
+
+        bot.send_video(
+            chat_id=message.chat.id,
+            video=video_bytes,
+            caption=f"🎬 {clean_title}",
+            reply_to_message_id=message.message_id,
+            supports_streaming=True
+        )
+        bot.delete_message(message.chat.id, status_msg.message_id)
+
+    except Exception as error:
+        print(f"[Upload] Lỗi: {error}")
+        try:
+            markup = telebot.types.InlineKeyboardMarkup()
+            if video_url:
+                markup.add(telebot.types.InlineKeyboardButton("👉 Bấm vào đây để tải video", url=video_url))
+            bot.edit_message_text(
+                "⚠️ File quá nặng (>50MB) hoặc mạng bị nghẽn.\n"
+                "Bấm nút dưới để tải về máy:" if video_url else
+                "⚠️ Có lỗi xảy ra, vui lòng thử lại sau.",
+                message.chat.id, status_msg.message_id,
+                reply_markup=markup if video_url else None
+            )
+        except Exception:
+            pass
+
+
+# ============================================================
+# 4. KHỞI ĐỘNG
+# Vòng lặp ngoài để tự khởi động lại polling nếu bị crash/mất kết nối,
+# tránh tình trạng bot "đơ" vĩnh viễn cho tới khi có người restart thủ công.
+if __name__ == "__main__":
+    Thread(target=run_flask, daemon=True).start()
+
+    while True:
+        try:
+            bot.delete_webhook(drop_pending_updates=True)
+            time.sleep(1)
+            print("✅ Bot TikTok sẵn sàng!")
+            bot.infinity_polling(timeout=20, long_polling_timeout=10)
+        except Exception as e:
+            print(f"[Polling] Lỗi, khởi động lại sau 5 giây: {e}")
+            time.sleep(5)
